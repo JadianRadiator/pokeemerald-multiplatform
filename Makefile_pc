@@ -8,6 +8,7 @@ endif
 OBJCOPY := $(PREFIX)objcopy
 CC := $(PREFIX)gcc
 AS := $(PREFIX)as
+WINDRES := $(PREFIX)windres
 
 SDL_DIR := /usr/i686-w64-mingw32
 ASM_PSEUDO_OP_CONV := sed -e 's/\.4byte/\.int/g;s/\.2byte/\.short/g'
@@ -189,6 +190,10 @@ MID_SRCS := $(wildcard $(MID_SUBDIR)/*.mid)
 MID_OBJS := $(patsubst $(MID_SUBDIR)/%.mid,$(MID_BUILDDIR)/%.o,$(MID_SRCS))
 
 OBJS     := $(C_OBJS) $(GFLIB_OBJS) $(ASM_OBJS) $(DATA_ASM_OBJS) $(SONG_OBJS) $(MID_OBJS)
+ifneq ($(NATIVE_LINUX),1)
+WINDOWS_RESOURCE_OBJ := $(OBJ_DIR)/pokemon_emerald_icon.o
+OBJS += $(WINDOWS_RESOURCE_OBJ)
+endif
 OBJS_REL := $(patsubst $(OBJ_DIR)/%,%,$(OBJS))
 
 SUBDIRS  := $(sort $(dir $(OBJS)))
@@ -340,6 +345,9 @@ LD_SCRIPT_DEPS :=
 
 $(OBJ_DIR)/ld_script.ld: $(LD_SCRIPT) $(LD_SCRIPT_DEPS)
 	cd $(OBJ_DIR) && sed "s#tools/#../../tools/#g" ../../$(LD_SCRIPT) > ld_script.ld
+
+$(OBJ_DIR)/pokemon_emerald_icon.o: resources/pokemon_emerald.rc resources/pokemon_emerald.ico
+	$(WINDRES) $< -O coff -o $@
 
 $(ELF): $(OBJ_DIR)/ld_script.ld $(OBJS)
 	cd $(OBJ_DIR) && $(LD) $(LDFLAGS) -T ld_script.ld -o ../../$@ $(OBJS_REL) $(LIB)

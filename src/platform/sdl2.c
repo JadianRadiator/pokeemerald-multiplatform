@@ -31,6 +31,7 @@ SDL_Thread *mainLoopThread;
 SDL_Window *sdlWindow;
 SDL_Renderer *sdlRenderer;
 SDL_Texture *sdlTexture;
+SDL_AudioDeviceID sdlAudioDevice;
 SDL_sem *vBlankSemaphore;
 SDL_atomic_t isFrameAvailable;
 bool speedUp = false;
@@ -45,6 +46,7 @@ double timeScale = 1.0;
 struct SiiRtcInfo internalClock;
 
 static FILE *sSaveFile = NULL;
+static char sSavePath[1024] = "pokeemerald.sav";
 
 extern void AgbMain(void);
 extern void DoSoftReset(void);
@@ -53,7 +55,7 @@ int DoMain(void *param);
 void ProcessEvents(void);
 void VDraw(SDL_Texture *texture);
 
-static void ReadSaveFile(char *path);
+static void ReadSaveFile(const char *path);
 static void StoreSaveFile(void);
 static void CloseSaveFile(void);
 
@@ -68,14 +70,28 @@ int main(int argc, char **argv)
     freopen( "CON", "w", stdout ) ;
 #endif
 
-    ReadSaveFile("pokeemerald.sav");
-
+#ifdef __ANDROID__
+    SDL_setenv("SDL_AUDIODRIVER", "openslES", 1);
+#endif
     if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0)
     {
         DBGPRINTF("SDL could not initialize! SDL_Error: %s\n", SDL_GetError());
         return 1;
     }
 
+#ifdef __ANDROID__
+    char *prefPath = SDL_GetPrefPath("pokeemerald", "pokeemerald");
+    if (prefPath != NULL)
+    {
+        SDL_snprintf(sSavePath, sizeof(sSavePath), "%spokeemerald.sav", prefPath);
+        SDL_free(prefPath);
+    }
+#endif
+    ReadSaveFile(sSavePath);
+
+#ifdef __ANDROID__
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#endif
     sdlWindow = SDL_CreateWindow("pokeemerald", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, DISPLAY_WIDTH * videoScale, DISPLAY_HEIGHT * videoScale, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
     if (sdlWindow == NULL)
     {
@@ -83,7 +99,11 @@ int main(int argc, char **argv)
         return 1;
     }
 
+#ifdef __ANDROID__
+    sdlRenderer = SDL_CreateRenderer(sdlWindow, -1, SDL_RENDERER_ACCELERATED);
+#else
     sdlRenderer = SDL_CreateRenderer(sdlWindow, -1, SDL_RENDERER_PRESENTVSYNC);
+#endif
     if (sdlRenderer == NULL)
     {
         DBGPRINTF("Renderer could not be created! SDL_Error: %s\n", SDL_GetError());
@@ -97,7 +117,7 @@ int main(int argc, char **argv)
     SDL_RenderSetIntegerScale(sdlRenderer, SDL_TRUE);
 
     sdlTexture = SDL_CreateTexture(sdlRenderer,
-                                   SDL_PIXELFORMAT_ABGR1555,
+                                   SDL_PIXELFORMAT_ARGB8888,
                                    SDL_TEXTUREACCESS_STREAMING,
                                    DISPLAY_WIDTH, DISPLAY_HEIGHT);
     if (sdlTexture == NULL)
@@ -105,6 +125,7 @@ int main(int argc, char **argv)
         DBGPRINTF("Texture could not be created! SDL_Error: %s\n", SDL_GetError());
         return 1;
     }
+    SDL_SetTextureBlendMode(sdlTexture, SDL_BLENDMODE_NONE);
 
     simTime = curGameTime = lastGameTime = SDL_GetPerformanceCounter();
 
@@ -121,16 +142,18 @@ int main(int argc, char **argv)
     cgb_audio_init(want.freq);
 
 
-    if (SDL_OpenAudio(&want, 0) < 0)
+    sdlAudioDevice = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
+    if (sdlAudioDevice == 0)
         SDL_Log("Failed to open audio: %s", SDL_GetError());
     else
     {
         if (want.format != AUDIO_F32) /* we let this one thing change. */
             SDL_Log("We didn't get Float32 audio format.");
-        SDL_PauseAudio(0);
+        SDL_PauseAudioDevice(sdlAudioDevice, 0);
     }
-    
+#ifndef __ANDROID__
     VDraw(sdlTexture);
+#endif
     mainLoopThread = SDL_CreateThread(DoMain, "AgbMain", NULL);
 
     double accumulator = 0.0;
@@ -162,13 +185,20 @@ int main(int argc, char **argv)
                     VDraw(sdlTexture);
                     SDL_RenderClear(sdlRenderer);
                     SDL_RenderCopy(sdlRenderer, sdlTexture, NULL, NULL);
+#ifdef __ANDROID__
+                    SDL_RenderPresent(sdlRenderer);
+#endif
                     SDL_AtomicSet(&isFrameAvailable, 0);
 
                     REG_DISPSTAT |= INTR_FLAG_VBLANK;
 
                     RunDMAs(DMA_HBLANK);
 
+#ifdef __ANDROID__
+                    if (REG_IE & INTR_FLAG_VBLANK)
+#else
                     if (REG_DISPSTAT & DISPSTAT_VBLANK_INTR)
+#endif
                         gIntrTable[4]();
                     REG_DISPSTAT &= ~INTR_FLAG_VBLANK;
 
@@ -179,7 +209,9 @@ int main(int argc, char **argv)
             }
         }
 
+#ifndef __ANDROID__
         SDL_RenderPresent(sdlRenderer);
+#endif
     }
 
     //StoreSaveFile();
@@ -190,13 +222,20 @@ int main(int argc, char **argv)
     return 0;
 }
 
-static void ReadSaveFile(char *path)
+static void ReadSaveFile(const char *path)
 {
     // Check whether the saveFile exists, and create it if not
     sSaveFile = fopen(path, "r+b");
     if (sSaveFile == NULL)
     {
         sSaveFile = fopen(path, "w+b");
+    }
+
+    if (sSaveFile == NULL)
+    {
+        memset(FLASH_BASE, 0xFF, sizeof(FLASH_BASE));
+        SDL_Log("Unable to open save file: %s", path);
+        return;
     }
 
     fseek(sSaveFile, 0, SEEK_END);
@@ -233,7 +272,7 @@ void Platform_StoreSaveFile(void)
 void Platform_ReadFlash(u16 sectorNum, u32 offset, u8 *dest, u32 size)
 {
     DBGPRINTF("ReadFlash(sectorNum=0x%04X,offset=0x%08X,size=0x%02X)\n",sectorNum,offset,size);
-    FILE * savefile = fopen("pokeemerald.sav", "r+b");
+    FILE * savefile = fopen(sSavePath, "r+b");
     if (savefile == NULL)
     {
         puts("Error opening save file.");
@@ -254,7 +293,11 @@ void Platform_ReadFlash(u16 sectorNum, u32 offset, u8 *dest, u32 size)
 
 void Platform_QueueAudio(float *audioBuffer, s32 samplesPerFrame)
 {
-    SDL_QueueAudio(1, audioBuffer, samplesPerFrame);
+    if (sdlAudioDevice != 0)
+    {
+        if (SDL_QueueAudio(sdlAudioDevice, audioBuffer, samplesPerFrame) < 0)
+            SDL_Log("Failed to queue audio: %s", SDL_GetError());
+    }
 }
 
 
@@ -315,8 +358,8 @@ void ProcessEvents(void)
                 {
                     speedUp = false;
                     timeScale = 1.0;
-                    SDL_ClearQueuedAudio(1);
-                    SDL_PauseAudio(0);
+                    SDL_ClearQueuedAudio(sdlAudioDevice);
+                    SDL_PauseAudioDevice(sdlAudioDevice, 0);
                 }
                 break;
             }
@@ -351,7 +394,7 @@ void ProcessEvents(void)
                 {
                     speedUp = true;
                     timeScale = 5.0;
-                    SDL_PauseAudio(1);
+                    SDL_PauseAudioDevice(sdlAudioDevice, 1);
                 }
                 break;
             }
@@ -403,12 +446,12 @@ u16 GetXInputKeys()
         {
             if (timeScale > 1.0)
             {
-                SDL_PauseAudio(1);
+                SDL_PauseAudioDevice(sdlAudioDevice, 1);
             }
             else
             {
-                SDL_ClearQueuedAudio(1);
-                SDL_PauseAudio(0);
+                SDL_ClearQueuedAudio(sdlAudioDevice);
+                SDL_PauseAudioDevice(sdlAudioDevice, 0);
             }
         }
     }
@@ -429,17 +472,27 @@ u16 Platform_GetKeyInput(void)
 
 void VDraw(SDL_Texture *texture)
 {
-    static uint16_t image[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+    static uint16_t gbaImage[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+    static uint32_t image[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 
-    memset(image, 0, sizeof(image));
-    DrawFrame(image);
-    SDL_UpdateTexture(texture, NULL, image, DISPLAY_WIDTH * sizeof (Uint16));
+    memset(gbaImage, 0, sizeof(gbaImage));
+    DrawFrame(gbaImage);
+    for (int i = 0; i < DISPLAY_WIDTH * DISPLAY_HEIGHT; i++)
+    {
+        uint16_t color = gbaImage[i];
+        uint32_t r = (color & 0x1F) * 255 / 31;
+        uint32_t g = ((color >> 5) & 0x1F) * 255 / 31;
+        uint32_t b = ((color >> 10) & 0x1F) * 255 / 31;
+        image[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
+    }
+    SDL_UpdateTexture(texture, NULL, image, DISPLAY_WIDTH * sizeof(Uint32));
     REG_VCOUNT = 161; // prep for being in VBlank period
 }
 
 int DoMain(void *data)
 {
     AgbMain();
+    return 0;
 }
 
 void VBlankIntrWait(void)

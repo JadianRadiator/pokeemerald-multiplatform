@@ -1,6 +1,6 @@
 # pokeemerald-multiplatform
 
-An experimental Windows and Linux PC port of the [Pokémon Emerald decompilation](https://github.com/pret/pokeemerald), with early Android porting work.
+An experimental Windows, Linux, and Android port of the [Pokemon Emerald decompilation](https://github.com/pret/pokeemerald).
 
 The project runs the decompiled game code directly. It is not a bundled GBA emulator and does not include a commercial ROM.
 
@@ -10,7 +10,7 @@ The project runs the decompiled game code directly. It is not a bundled GBA emul
 | --- | --- | --- |
 | Windows | Working through the SDL2 backend | `pokeemerald.exe` |
 | Linux | Working native 32-bit SDL2 build | `pokeemerald` |
-| Android | Experimental, not currently linkable | APK pending |
+| Android | Working experimental ARMv7 SDL2 build | `android/app/build/outputs/apk/debug/app-debug.apk` |
 | GBA ROM | Upstream target | `pokeemerald.gba` |
 
 ## Port Changes
@@ -26,6 +26,8 @@ The project runs the decompiled game code directly. It is not a bundled GBA emul
 - Added native 32-bit Linux compilation and SDL2 linkage.
 - Added aspect-ratio-preserving 3:2 rendering, centered letterboxing, integer pixel scaling, and black borders.
 - Added an experimental Android SDL2/Gradle project and an ARMv7 cross-compilation pipeline.
+- Added Android rendering, frame pacing, audio output, writable save storage, and lifecycle handling.
+- Added launcher icons on Android and an embedded multi-resolution icon on Windows.
 
 ## Controls
 
@@ -69,6 +71,8 @@ make -f Makefile_pc linux -j4
 
 Linux objects are kept separately under `build/linux`, so they do not interfere with the Windows build.
 
+The resulting executable is `pokeemerald` in the repository root.
+
 ## Saving
 
 Save data is read from and written to:
@@ -79,11 +83,30 @@ pokeemerald.sav
 
 Keep this file if you clean or move the build.
 
-## Android Status
+## Android Build
 
-The experimental Android project is under `android/` and currently targets `armeabi-v7a` to preserve the required 32-bit pointer layout.
+The Android project targets API 36 and `armeabi-v7a`. The 32-bit ABI is required by the game's current pointer layout. Android SDK 36, NDK `26.3.11579264`, CMake 3.22.1, and a compatible JDK are required.
 
-The C sources and SDL2 library cross-compile successfully. Final linking is blocked because generated game data contains fixed-address 16-bit and 32-bit relocations, while Android requires a position-independent `libmain.so`. A proper Android port must convert those embedded references into runtime-relative or otherwise position-independent representations.
+Initialize SDL2 and apply the Android lifecycle patch once after cloning:
+
+```sh
+git submodule update --init --recursive
+git -C android/SDL2 apply ../patches/sdl2-android-lifecycle.patch
+```
+
+Set `JAVA_HOME` and `ANDROID_HOME`, then build with SDL2's Gradle wrapper:
+
+```sh
+android/SDL2/android-project/gradlew -p android :app:assembleDebug
+```
+
+Install the debug APK on a connected device with:
+
+```sh
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+Android saves are stored in the app's writable private storage. Windows and Linux continue to use `pokeemerald.sav` in the working directory.
 
 No touch controls have been implemented.
 
