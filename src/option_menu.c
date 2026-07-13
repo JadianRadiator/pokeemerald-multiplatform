@@ -6,6 +6,7 @@
 #include "main.h"
 #include "menu.h"
 #include "palette.h"
+#include "platform.h"
 #include "scanline_effect.h"
 #include "sprite.h"
 #include "strings.h"
@@ -23,6 +24,9 @@
 #define tSound data[4]
 #define tButtonMode data[5]
 #define tWindowFrameType data[6]
+#define tBorderBackground data[7]
+
+#define OPTION_ROW_HEIGHT 14
 
 enum
 {
@@ -32,6 +36,7 @@ enum
     MENUITEM_SOUND,
     MENUITEM_BUTTONMODE,
     MENUITEM_FRAMETYPE,
+    MENUITEM_BORDERBACKGROUND,
     MENUITEM_CANCEL,
     MENUITEM_COUNT,
 };
@@ -42,12 +47,13 @@ enum
     WIN_OPTIONS
 };
 
-#define YPOS_TEXTSPEED    (MENUITEM_TEXTSPEED * 16)
-#define YPOS_BATTLESCENE  (MENUITEM_BATTLESCENE * 16)
-#define YPOS_BATTLESTYLE  (MENUITEM_BATTLESTYLE * 16)
-#define YPOS_SOUND        (MENUITEM_SOUND * 16)
-#define YPOS_BUTTONMODE   (MENUITEM_BUTTONMODE * 16)
-#define YPOS_FRAMETYPE    (MENUITEM_FRAMETYPE * 16)
+#define YPOS_TEXTSPEED       (MENUITEM_TEXTSPEED * OPTION_ROW_HEIGHT)
+#define YPOS_BATTLESCENE     (MENUITEM_BATTLESCENE * OPTION_ROW_HEIGHT)
+#define YPOS_BATTLESTYLE     (MENUITEM_BATTLESTYLE * OPTION_ROW_HEIGHT)
+#define YPOS_SOUND           (MENUITEM_SOUND * OPTION_ROW_HEIGHT)
+#define YPOS_BUTTONMODE      (MENUITEM_BUTTONMODE * OPTION_ROW_HEIGHT)
+#define YPOS_FRAMETYPE       (MENUITEM_FRAMETYPE * OPTION_ROW_HEIGHT)
+#define YPOS_BORDERBACKGROUND (MENUITEM_BORDERBACKGROUND * OPTION_ROW_HEIGHT)
 
 static void Task_OptionMenuFadeIn(u8 taskId);
 static void Task_OptionMenuProcessInput(u8 taskId);
@@ -66,6 +72,9 @@ static u8 FrameType_ProcessInput(u8 selection);
 static void FrameType_DrawChoices(u8 selection);
 static u8 ButtonMode_ProcessInput(u8 selection);
 static void ButtonMode_DrawChoices(u8 selection);
+static u8 BorderBackground_ProcessInput(u8 selection);
+static void BorderBackground_DrawChoices(u8 selection);
+static u8 GetBorderBackgroundCount(void);
 static void DrawHeaderText(void);
 static void DrawOptionMenuTexts(void);
 static void DrawBgWindowFrames(void);
@@ -84,6 +93,7 @@ static const u8 *const sOptionMenuItemsNames[MENUITEM_COUNT] =
     [MENUITEM_SOUND]       = gText_Sound,
     [MENUITEM_BUTTONMODE]  = gText_ButtonMode,
     [MENUITEM_FRAMETYPE]   = gText_Frame,
+    [MENUITEM_BORDERBACKGROUND] = gText_BorderBackground,
     [MENUITEM_CANCEL]      = gText_OptionMenuCancel,
 };
 
@@ -234,6 +244,9 @@ void CB2_InitOptionMenu(void)
         gTasks[taskId].tSound = gSaveBlock2Ptr->optionsSound;
         gTasks[taskId].tButtonMode = gSaveBlock2Ptr->optionsButtonMode;
         gTasks[taskId].tWindowFrameType = gSaveBlock2Ptr->optionsWindowFrameType;
+        gTasks[taskId].tBorderBackground = gSaveBlock2Ptr->optionsBorderBackground;
+        if (gTasks[taskId].tBorderBackground >= GetBorderBackgroundCount())
+            gTasks[taskId].tBorderBackground = 0;
 
         TextSpeed_DrawChoices(gTasks[taskId].tTextSpeed);
         BattleScene_DrawChoices(gTasks[taskId].tBattleSceneOff);
@@ -241,6 +254,7 @@ void CB2_InitOptionMenu(void)
         Sound_DrawChoices(gTasks[taskId].tSound);
         ButtonMode_DrawChoices(gTasks[taskId].tButtonMode);
         FrameType_DrawChoices(gTasks[taskId].tWindowFrameType);
+        BorderBackground_DrawChoices(gTasks[taskId].tBorderBackground);
         HighlightOptionMenuItem(gTasks[taskId].tMenuSelection);
 
         CopyWindowToVram(WIN_OPTIONS, COPYWIN_FULL);
@@ -336,6 +350,16 @@ static void Task_OptionMenuProcessInput(u8 taskId)
             if (previousOption != gTasks[taskId].tWindowFrameType)
                 FrameType_DrawChoices(gTasks[taskId].tWindowFrameType);
             break;
+        case MENUITEM_BORDERBACKGROUND:
+            previousOption = gTasks[taskId].tBorderBackground;
+            gTasks[taskId].tBorderBackground = BorderBackground_ProcessInput(gTasks[taskId].tBorderBackground);
+
+            if (previousOption != gTasks[taskId].tBorderBackground)
+            {
+                gSaveBlock2Ptr->optionsBorderBackground = gTasks[taskId].tBorderBackground;
+                BorderBackground_DrawChoices(gTasks[taskId].tBorderBackground);
+            }
+            break;
         default:
             return;
         }
@@ -356,6 +380,7 @@ static void Task_OptionMenuSave(u8 taskId)
     gSaveBlock2Ptr->optionsSound = gTasks[taskId].tSound;
     gSaveBlock2Ptr->optionsButtonMode = gTasks[taskId].tButtonMode;
     gSaveBlock2Ptr->optionsWindowFrameType = gTasks[taskId].tWindowFrameType;
+    gSaveBlock2Ptr->optionsBorderBackground = gTasks[taskId].tBorderBackground;
 
     BeginNormalPaletteFade(PALETTES_ALL, 0, 0, 16, RGB_BLACK);
     gTasks[taskId].func = Task_OptionMenuFadeOut;
@@ -374,7 +399,7 @@ static void Task_OptionMenuFadeOut(u8 taskId)
 static void HighlightOptionMenuItem(u8 index)
 {
     SetGpuReg(REG_OFFSET_WIN0H, WIN_RANGE(16, DISPLAY_WIDTH - 16));
-    SetGpuReg(REG_OFFSET_WIN0V, WIN_RANGE(index * 16 + 40, index * 16 + 56));
+    SetGpuReg(REG_OFFSET_WIN0V, WIN_RANGE(index * OPTION_ROW_HEIGHT + 40, index * OPTION_ROW_HEIGHT + 54));
 }
 
 static void DrawOptionMenuChoice(const u8 *text, u8 x, u8 y, u8 style)
@@ -615,6 +640,57 @@ static void ButtonMode_DrawChoices(u8 selection)
     DrawOptionMenuChoice(gText_ButtonTypeLEqualsA, GetStringRightAlignXOffset(FONT_NORMAL, gText_ButtonTypeLEqualsA, 198), YPOS_BUTTONMODE, styles[2]);
 }
 
+static u8 BorderBackground_ProcessInput(u8 selection)
+{
+    u8 count = GetBorderBackgroundCount();
+
+    if (JOY_NEW(DPAD_RIGHT))
+    {
+        selection = (selection + 1) % count;
+        sArrowPressed = TRUE;
+    }
+    if (JOY_NEW(DPAD_LEFT))
+    {
+        selection = selection == 0 ? count - 1 : selection - 1;
+        sArrowPressed = TRUE;
+    }
+    return selection;
+}
+
+static u8 GetBorderBackgroundCount(void)
+{
+#ifdef PLATFORM_SDL2
+    return Platform_GetBorderBackgroundCount();
+#else
+    return 2;
+#endif
+}
+
+static void BorderBackground_DrawChoices(u8 selection)
+{
+    u8 text[16];
+    u8 i;
+
+    if (selection == 1)
+    {
+        DrawOptionMenuChoice(gText_BorderBackgroundOff, 104, YPOS_BORDERBACKGROUND, 1);
+        return;
+    }
+
+    for (i = 0; gText_BorderBackgroundName[i] != EOS; i++)
+        text[i] = gText_BorderBackgroundName[i];
+
+    if (selection >= 2)
+    {
+        text[i++] = CHAR_SPACE;
+        if (selection - 1 >= 10)
+            text[i++] = (selection - 1) / 10 + CHAR_0;
+        text[i++] = (selection - 1) % 10 + CHAR_0;
+    }
+    text[i] = EOS;
+    DrawOptionMenuChoice(text, 104, YPOS_BORDERBACKGROUND, 1);
+}
+
 static void DrawHeaderText(void)
 {
     FillWindowPixelBuffer(WIN_HEADER, PIXEL_FILL(1));
@@ -628,7 +704,7 @@ static void DrawOptionMenuTexts(void)
 
     FillWindowPixelBuffer(WIN_OPTIONS, PIXEL_FILL(1));
     for (i = 0; i < MENUITEM_COUNT; i++)
-        AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, sOptionMenuItemsNames[i], 8, (i * 16) + 1, TEXT_SKIP_DRAW, NULL);
+        AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, sOptionMenuItemsNames[i], 8, (i * OPTION_ROW_HEIGHT) + 1, TEXT_SKIP_DRAW, NULL);
     CopyWindowToVram(WIN_OPTIONS, COPYWIN_FULL);
 }
 

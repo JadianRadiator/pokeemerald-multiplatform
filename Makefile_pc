@@ -80,7 +80,7 @@ endif
 
 CPPFLAGS := -std=gnu99 -iquote include -iquote $(GFLIB_SUBDIR) -Wno-trigraphs -D NONMATCHING -D PORTABLE -D $(TARGET_PLATFORM) -D $(TILE_RENDERER) -D MODERN=$(MODERN) -D UBFIX
 ifeq ($(NATIVE_LINUX),1)
-CPPFLAGS += -m32 $(shell pkg-config --cflags sdl2)
+CPPFLAGS += -m32 -D NATIVE_LINUX $(shell pkg-config --cflags sdl2 SDL2_image)
 else
 CPPFLAGS += -I$(SDL_DIR)/include -L$(SDL_DIR)/lib
 endif
@@ -90,7 +90,7 @@ LDFLAGS = -Map ../../$(MAP)
 PLATFORM_INCLUDES := 
 
 ifeq ($(NATIVE_LINUX),1)
-PLATFORM_INCLUDES += $(shell pkg-config --libs sdl2) -lm
+PLATFORM_INCLUDES += $(shell pkg-config --libs sdl2 SDL2_image) -lm
 else
 # Windows only
 ifneq ($(NO_STD_LIB),1)
@@ -188,11 +188,14 @@ SONG_OBJS := $(patsubst $(SONG_SUBDIR)/%.s,$(SONG_BUILDDIR)/%.o,$(SONG_SRCS))
 
 MID_SRCS := $(wildcard $(MID_SUBDIR)/*.mid)
 MID_OBJS := $(patsubst $(MID_SUBDIR)/%.mid,$(MID_BUILDDIR)/%.o,$(MID_SRCS))
+BACKGROUND_PNGS := BG.png $(sort $(wildcard BG[0-9].png BG[0-9][0-9].png))
+BACKGROUND_BMPS := $(patsubst %.png,%.bmp,$(BACKGROUND_PNGS))
 
 OBJS     := $(C_OBJS) $(GFLIB_OBJS) $(ASM_OBJS) $(DATA_ASM_OBJS) $(SONG_OBJS) $(MID_OBJS)
 ifneq ($(NATIVE_LINUX),1)
 WINDOWS_RESOURCE_OBJ := $(OBJ_DIR)/pokemon_emerald_icon.o
 OBJS += $(WINDOWS_RESOURCE_OBJ)
+WINDOWS_BORDER := $(BACKGROUND_BMPS) Border.bmp
 endif
 OBJS_REL := $(patsubst $(OBJ_DIR)/%,%,$(OBJS))
 
@@ -349,13 +352,19 @@ $(OBJ_DIR)/ld_script.ld: $(LD_SCRIPT) $(LD_SCRIPT_DEPS)
 $(OBJ_DIR)/pokemon_emerald_icon.o: resources/pokemon_emerald.rc resources/pokemon_emerald.ico
 	$(WINDRES) $< -O coff -o $@
 
+BG%.bmp: BG%.png
+	magick $< -define bmp:format=bmp4 $@
+
+Border.bmp: Border.png
+	magick $< -define bmp:format=bmp4 $@
+
 $(ELF): $(OBJ_DIR)/ld_script.ld $(OBJS)
 	cd $(OBJ_DIR) && $(LD) $(LDFLAGS) -T ld_script.ld -o ../../$@ $(OBJS_REL) $(LIB)
 	$(FIX) $@ -t"$(TITLE)" -c$(GAME_CODE) -m$(MAKER_CODE) -r$(REVISION) --silent
 
-$(ROM): $(OBJS)
+$(ROM): $(OBJS) $(WINDOWS_BORDER)
 ifeq ($(NATIVE_LINUX),1)
-	$(CC) $(CFLAGS) -no-pie -Wl,--demangle $^ $(PLATFORM_INCLUDES) -o $@
+	$(CC) $(CFLAGS) -no-pie -Wl,--demangle $(OBJS) $(PLATFORM_INCLUDES) -o $@
 else
-	$(CC) $(CFLAGS) -Wl,--demangle $^ -static-libgcc -L$(SDL_DIR)/lib $(PLATFORM_INCLUDES) -lwinmm -lxinput -o $@
+	$(CC) $(CFLAGS) -Wl,--demangle $(OBJS) -static-libgcc -L$(SDL_DIR)/lib $(PLATFORM_INCLUDES) -lwinmm -lxinput -o $@
 endif

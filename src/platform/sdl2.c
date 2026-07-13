@@ -10,9 +10,13 @@
 #endif
 
 #ifdef __ANDROID__
+#include <jni.h>
 #include <SDL.h>
 #else
 #include <SDL2/SDL.h>
+#endif
+#ifdef NATIVE_LINUX
+#include <SDL2/SDL_image.h>
 #endif
 
 #include "global.h"
@@ -31,6 +35,12 @@ SDL_Thread *mainLoopThread;
 SDL_Window *sdlWindow;
 SDL_Renderer *sdlRenderer;
 SDL_Texture *sdlTexture;
+#if defined(NATIVE_LINUX) || defined(_WIN32)
+#define MAX_BORDER_BACKGROUNDS 15
+SDL_Texture *sdlBackgroundTextures[MAX_BORDER_BACKGROUNDS];
+SDL_Texture *sdlBorderTexture;
+#endif
+static u8 sBorderBackgroundCount = 1;
 SDL_AudioDeviceID sdlAudioDevice;
 SDL_sem *vBlankSemaphore;
 SDL_atomic_t isFrameAvailable;
@@ -114,7 +124,11 @@ int main(int argc, char **argv)
 #ifdef __ANDROID__
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 #endif
+#if defined(NATIVE_LINUX) || defined(_WIN32)
+    sdlWindow = SDL_CreateWindow("Pokemon Emerald", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+#else
     sdlWindow = SDL_CreateWindow("pokeemerald", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, DISPLAY_WIDTH * videoScale, DISPLAY_HEIGHT * videoScale, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+#endif
     if (sdlWindow == NULL)
     {
         DBGPRINTF("Window could not be created! SDL_Error: %s\n", SDL_GetError());
@@ -135,8 +149,69 @@ int main(int argc, char **argv)
     SDL_SetRenderDrawColor(sdlRenderer, 0, 0, 0, 255);
     SDL_RenderClear(sdlRenderer);
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+
+    for (int i = 1; i < 15; i++)
+    {
+        char filename[16];
+#ifdef _WIN32
+        snprintf(filename, sizeof(filename), "BG%d.bmp", i);
+#else
+        snprintf(filename, sizeof(filename), "BG%d.png", i);
+#endif
+        SDL_RWops *backgroundFile = SDL_RWFromFile(filename, "rb");
+        if (backgroundFile == NULL)
+            break;
+        SDL_RWclose(backgroundFile);
+        sBorderBackgroundCount++;
+    }
+#ifdef NATIVE_LINUX
+    SDL_RenderSetLogicalSize(sdlRenderer, 0, 0);
+    if ((IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG) == 0)
+    {
+        SDL_Log("SDL_image could not initialize: %s", IMG_GetError());
+    }
+    else
+    {
+        for (int i = 0; i < sBorderBackgroundCount; i++)
+        {
+            char filename[16];
+            snprintf(filename, sizeof(filename), i == 0 ? "BG.png" : "BG%d.png", i);
+            sdlBackgroundTextures[i] = IMG_LoadTexture(sdlRenderer, filename);
+        }
+        sdlBorderTexture = IMG_LoadTexture(sdlRenderer, "Border.png");
+        if (sdlBackgroundTextures[0] == NULL)
+            SDL_Log("Background image could not be loaded: %s", IMG_GetError());
+        if (sdlBorderTexture == NULL)
+            SDL_Log("Border image could not be loaded: %s", IMG_GetError());
+    }
+#elif defined(_WIN32)
+    SDL_RenderSetLogicalSize(sdlRenderer, 0, 0);
+    SDL_Surface *borderSurface = SDL_LoadBMP("Border.bmp");
+    for (int i = 0; i < sBorderBackgroundCount; i++)
+    {
+        char filename[16];
+        snprintf(filename, sizeof(filename), i == 0 ? "BG.bmp" : "BG%d.bmp", i);
+        SDL_Surface *backgroundSurface = SDL_LoadBMP(filename);
+        if (backgroundSurface == NULL)
+            continue;
+        sdlBackgroundTextures[i] = SDL_CreateTextureFromSurface(sdlRenderer, backgroundSurface);
+        SDL_FreeSurface(backgroundSurface);
+    }
+    if (sdlBackgroundTextures[0] == NULL)
+        SDL_Log("Background image could not be loaded: %s", SDL_GetError());
+    if (borderSurface == NULL)
+    {
+        SDL_Log("Border image could not be loaded: %s", SDL_GetError());
+    }
+    else
+    {
+        sdlBorderTexture = SDL_CreateTextureFromSurface(sdlRenderer, borderSurface);
+        SDL_FreeSurface(borderSurface);
+    }
+#else
     SDL_RenderSetLogicalSize(sdlRenderer, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     SDL_RenderSetIntegerScale(sdlRenderer, SDL_TRUE);
+#endif
 
     sdlTexture = SDL_CreateTexture(sdlRenderer,
                                    SDL_PIXELFORMAT_ARGB8888,
@@ -206,7 +281,37 @@ int main(int argc, char **argv)
                 {
                     VDraw(sdlTexture);
                     SDL_RenderClear(sdlRenderer);
+#if defined(NATIVE_LINUX) || defined(_WIN32)
+                    u8 backgroundOption = gSaveBlock2Ptr->optionsBorderBackground;
+                    int backgroundIndex = backgroundOption == 0 ? 0 : backgroundOption - 1;
+                    if (backgroundOption != 1 && backgroundIndex < sBorderBackgroundCount
+                     && sdlBackgroundTextures[backgroundIndex] != NULL)
+                        SDL_RenderCopy(sdlRenderer, sdlBackgroundTextures[backgroundIndex], NULL, NULL);
+                    int outputWidth;
+                    int outputHeight;
+                    SDL_GetRendererOutputSize(sdlRenderer, &outputWidth, &outputHeight);
+                    int gameHeight = outputHeight * 8 / 9;
+                    int gameWidth = gameHeight * 3 / 2;
+                    SDL_Rect gameViewport = {(outputWidth - gameWidth) / 2,
+                                             (outputHeight - gameHeight) / 2,
+                                             gameWidth, gameHeight};
+                    SDL_RenderCopy(sdlRenderer, sdlTexture, NULL, &gameViewport);
+                    if (sdlBorderTexture != NULL)
+                    {
+                        SDL_Rect borderSource = {141, 18, 1000, 683};
+                        int innerWidth = gameViewport.w - 2;
+                        int innerHeight = gameViewport.h - 2;
+                        SDL_Rect borderViewport = {
+                            gameViewport.x + 1 - innerWidth * 19 / 961,
+                            gameViewport.y + 1 - innerHeight * 20 / 643,
+                            innerWidth * 1000 / 961,
+                            innerHeight * 683 / 643
+                        };
+                        SDL_RenderCopy(sdlRenderer, sdlBorderTexture, &borderSource, &borderViewport);
+                    }
+#else
                     SDL_RenderCopy(sdlRenderer, sdlTexture, NULL, NULL);
+#endif
 #ifdef __ANDROID__
                     SDL_RenderPresent(sdlRenderer);
 #endif
@@ -239,6 +344,14 @@ int main(int argc, char **argv)
     //StoreSaveFile();
     CloseSaveFile();
 
+#if defined(NATIVE_LINUX) || defined(_WIN32)
+    for (int i = 0; i < sBorderBackgroundCount; i++)
+        SDL_DestroyTexture(sdlBackgroundTextures[i]);
+    SDL_DestroyTexture(sdlBorderTexture);
+#endif
+#ifdef NATIVE_LINUX
+    IMG_Quit();
+#endif
     SDL_DestroyWindow(sdlWindow);
     SDL_Quit();
     return 0;
@@ -321,6 +434,18 @@ void Platform_QueueAudio(float *audioBuffer, s32 samplesPerFrame)
             SDL_Log("Failed to queue audio: %s", SDL_GetError());
     }
 }
+
+u8 Platform_GetBorderBackgroundCount(void)
+{
+    return sBorderBackgroundCount + 1;
+}
+
+#ifdef __ANDROID__
+JNIEXPORT jint JNICALL Java_com_pokeemerald_experimental_GbaControlsView_getBorderBackground(JNIEnv *env, jclass clazz)
+{
+    return gSaveBlock2Ptr->optionsBorderBackground;
+}
+#endif
 
 
 static void CloseSaveFile()

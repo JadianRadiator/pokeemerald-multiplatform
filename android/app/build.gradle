@@ -33,4 +33,17 @@ android {
     }
 
     sourceSets.main.java.srcDirs += '../SDL2/android-project/app/src/main/java'
+    sourceSets.main.assets.srcDir(layout.buildDirectory.dir('generated/borderAssets'))
+}
+
+tasks.register('copyBorderAsset', Sync) {
+    from(rootProject.file('..')) {
+        include 'BG*.png'
+        include 'Border.png'
+    }
+    into layout.buildDirectory.dir('generated/borderAssets')
+}
+
+tasks.named('preBuild').configure {
+    dependsOn tasks.named('copyBorderAsset')
 }

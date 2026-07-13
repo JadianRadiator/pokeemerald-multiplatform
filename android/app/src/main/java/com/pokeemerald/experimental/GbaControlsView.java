@@ -2,6 +2,8 @@ package com.pokeemerald.experimental;
 
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
@@ -10,6 +12,7 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 
+import java.io.IOException;
 import java.util.Arrays;
 
 import org.libsdl.app.SDLActivity;
@@ -29,6 +32,9 @@ public final class GbaControlsView extends View {
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint outline = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint borderPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private final Bitmap[] backgrounds = new Bitmap[15];
+    private Bitmap border;
     private int pressed;
 
     public GbaControlsView(Context context) {
@@ -40,6 +46,19 @@ public final class GbaControlsView extends View {
         text.setColor(Color.WHITE);
         text.setTextAlign(Paint.Align.CENTER);
         text.setFakeBoldText(true);
+        try {
+            backgrounds[0] = BitmapFactory.decodeStream(context.getAssets().open("BG.png"));
+            for (int i = 1; i < backgrounds.length; i++) {
+                try {
+                    backgrounds[i] = BitmapFactory.decodeStream(context.getAssets().open("BG" + i + ".png"));
+                } catch (IOException ignored) {
+                    break;
+                }
+            }
+            border = BitmapFactory.decodeStream(context.getAssets().open("Border.png"));
+        } catch (IOException ignored) {
+            border = null;
+        }
     }
 
     private int sideWidth() {
@@ -150,9 +169,40 @@ public final class GbaControlsView extends View {
         }
     }
 
+    private void drawBorder(Canvas canvas) {
+        int backgroundOption = getBorderBackground();
+        int backgroundIndex = backgroundOption == 0 ? 0 : backgroundOption - 1;
+        if (backgroundOption != 1 && backgroundIndex < backgrounds.length
+                && backgrounds[backgroundIndex] != null) {
+            canvas.drawBitmap(backgrounds[backgroundIndex], null,
+                    new Rect(0, 0, getWidth(), getHeight()), borderPaint);
+        }
+
+        int scale = Math.max(1, Math.min(getWidth() / 240, getHeight() / 160));
+        int gameWidth = 240 * scale;
+        int gameHeight = 160 * scale;
+        int gameX = (getWidth() - gameWidth) / 2;
+        int gameY = (getHeight() - gameHeight) / 2;
+
+        if (border != null) {
+            int innerWidth = gameWidth - 2;
+            int innerHeight = gameHeight - 2;
+            canvas.drawBitmap(border, new Rect(141, 18, 1141, 701),
+                    new Rect(
+                            gameX + 1 - innerWidth * 19 / 961,
+                            gameY + 1 - innerHeight * 20 / 643,
+                            gameX + 1 + innerWidth + innerWidth * 20 / 961,
+                            gameY + 1 + innerHeight + innerHeight * 20 / 643),
+                    borderPaint);
+        }
+    }
+
+    private static native int getBorderBackground();
+
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
+        drawBorder(canvas);
         drawControl(canvas, UP, null);
         drawControl(canvas, DOWN, null);
         drawControl(canvas, LEFT, null);

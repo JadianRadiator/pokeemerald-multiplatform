@@ -24,7 +24,8 @@ The project runs the decompiled game code directly. It is not a bundled GBA emul
 - Added working save-file access through `pokeemerald.sav`.
 - Added a Wine launcher for the Windows build.
 - Added native 32-bit Linux compilation and SDL2 linkage.
-- Added aspect-ratio-preserving 3:2 rendering, centered letterboxing, integer pixel scaling, and black borders.
+- Added aspect-ratio-preserving 3:2 rendering with independently scaled background artwork and a transparent frame.
+- Added a persistent `BORDER BG` option with automatic support for additional numbered background images.
 - Added an experimental Android SDL2/Gradle project and an ARMv7 cross-compilation pipeline.
 - Added Android rendering, frame pacing, audio output, writable save storage, and lifecycle handling.
 - Added an Android-native labeled multitouch overlay and SDL game-controller input.
@@ -49,7 +50,7 @@ Windows XInput controllers are supported by the SDL2 backend. Android supports S
 
 ## Windows Build
 
-The Windows target uses the 32-bit MinGW toolchain and SDL2:
+The Windows target uses the 32-bit MinGW toolchain, SDL2, and ImageMagick. ImageMagick converts the PNG border assets to alpha-preserving BMP files supported by the Windows SDL2 build:
 
 ```sh
 make -f Makefile_pc -j4
@@ -63,7 +64,7 @@ Place `SDL2.dll` beside `pokeemerald.exe`. On Linux, the Windows build can be la
 
 ## Linux Build
 
-The game data contains 32-bit pointers, so the native Linux target must currently be built as a 32-bit executable. Install a multilib C toolchain and 32-bit SDL2 development files, then run:
+The game data contains 32-bit pointers, so the native Linux target must currently be built as a 32-bit executable. Install a multilib C toolchain plus 32-bit SDL2 and SDL2_image development files, then run:
 
 ```sh
 make -f Makefile_pc linux -j4
@@ -73,6 +74,18 @@ make -f Makefile_pc linux -j4
 Linux objects are kept separately under `build/linux`, so they do not interfere with the Windows build.
 
 The resulting executable is `pokeemerald` in the repository root.
+
+## Border Artwork
+
+Windows, Linux, and Android use the same border assets from the repository root:
+
+- `Border.png` is the transparent frame fitted around the centered 3:2 gameplay viewport.
+- `BG.png` is the default background and scales independently to fill the complete output.
+- `BG1.png`, `BG2.png`, and subsequent sequentially numbered files add selectable backgrounds.
+
+The in-game Options menu includes `BORDER BG`. Select `BG` for the default artwork, `OFF` for a plain black background, or `BG 1`, `BG 2`, and so on for detected numbered backgrounds. The choice is stored in the save data. Numbered files must be contiguous; for example, `BG2.png` is only detected when `BG1.png` is also present.
+
+Backgrounds and the frame should use a 1280x720 canvas. Keep the frame opening centered at the same location and dimensions as `Border.png` so it remains aligned at different output aspect ratios.
 
 ## Saving
 
