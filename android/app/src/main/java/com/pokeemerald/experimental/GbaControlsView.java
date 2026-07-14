@@ -34,6 +34,7 @@ public final class GbaControlsView extends View {
     private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint borderPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final Bitmap[] backgrounds = new Bitmap[15];
+    private int backgroundCount;
     private Bitmap border;
     private int pressed;
 
@@ -48,9 +49,11 @@ public final class GbaControlsView extends View {
         text.setFakeBoldText(true);
         try {
             backgrounds[0] = BitmapFactory.decodeStream(context.getAssets().open("BG.png"));
+            backgroundCount = 1;
             for (int i = 1; i < backgrounds.length; i++) {
                 try {
                     backgrounds[i] = BitmapFactory.decodeStream(context.getAssets().open("BG" + i + ".png"));
+                    backgroundCount++;
                 } catch (IOException ignored) {
                     break;
                 }
@@ -177,10 +180,8 @@ public final class GbaControlsView extends View {
         int gameY = (getHeight() - gameHeight) / 2;
 
         int backgroundOption = getBorderBackground();
-        int backgroundIndex = backgroundOption == 0 ? 0 : backgroundOption - 1;
-        if (backgroundOption != 1 && backgroundIndex < backgrounds.length
-                && backgrounds[backgroundIndex] != null) {
-            Bitmap background = backgrounds[backgroundIndex];
+        if (backgroundOption < backgroundCount && backgrounds[backgroundOption] != null) {
+            Bitmap background = backgrounds[backgroundOption];
             Rect output = new Rect(0, 0, getWidth(), getHeight());
             Rect[] regions = {
                     new Rect(0, 0, getWidth(), gameY),
@@ -196,7 +197,7 @@ public final class GbaControlsView extends View {
             }
         }
 
-        if (border != null) {
+        if (getPlatformSetting(4) != 0 && border != null) {
             int innerWidth = gameWidth - 2;
             int innerHeight = gameHeight - 2;
             canvas.drawBitmap(border, new Rect(141, 18, 1141, 701),
@@ -210,6 +211,7 @@ public final class GbaControlsView extends View {
     }
 
     private static native int getBorderBackground();
+    private static native int getPlatformSetting(int setting);
 
     @Override
     protected void onDraw(Canvas canvas) {

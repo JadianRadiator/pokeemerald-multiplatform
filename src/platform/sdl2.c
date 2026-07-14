@@ -60,6 +60,8 @@ static char sSavePath[1024] = "pokeemerald.sav";
 static char sConfigPath[1024] = "pokeemerald.cfg";
 static u8 sBorderBackground;
 static bool sHasBorderBackgroundConfig;
+static u8 sBackgroundOrderVersion;
+static u8 sPlatformSettings[PLATFORM_SETTING_COUNT] = {0, 4, 0, 1, 1, 10};
 #ifdef __ANDROID__
 static SDL_GameController *androidController;
 #endif
@@ -74,6 +76,7 @@ void VDraw(SDL_Texture *texture);
 static void ReadSaveFile(const char *path);
 static void ReadConfigFile(void);
 static void StoreConfigFile(void);
+static void ApplyPlatformSettings(void);
 static void StoreSaveFile(void);
 static void CloseSaveFile(void);
 
@@ -171,6 +174,18 @@ int main(int argc, char **argv)
         SDL_RWclose(backgroundFile);
         sBorderBackgroundCount++;
     }
+    if (sBackgroundOrderVersion < 2)
+    {
+        if (sHasBorderBackgroundConfig)
+        {
+            if (sBorderBackground == 1)
+                sBorderBackground = sBorderBackgroundCount;
+            else if (sBorderBackground >= 2)
+                sBorderBackground--;
+        }
+        sBackgroundOrderVersion = 2;
+        StoreConfigFile();
+    }
 #ifdef NATIVE_LINUX
     SDL_RenderSetLogicalSize(sdlRenderer, 0, 0);
     if ((IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG) == 0)
@@ -219,6 +234,7 @@ int main(int argc, char **argv)
     SDL_RenderSetLogicalSize(sdlRenderer, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     SDL_RenderSetIntegerScale(sdlRenderer, SDL_TRUE);
 #endif
+    ApplyPlatformSettings();
 
     sdlTexture = SDL_CreateTexture(sdlRenderer,
                                    SDL_PIXELFORMAT_ARGB8888,
@@ -290,20 +306,34 @@ int main(int argc, char **argv)
                     SDL_RenderClear(sdlRenderer);
 #if defined(NATIVE_LINUX) || defined(_WIN32)
                     u8 backgroundOption = Platform_GetBorderBackground();
-                    int backgroundIndex = backgroundOption == 0 ? 0 : backgroundOption - 1;
-                    if (backgroundOption != 1 && backgroundIndex < sBorderBackgroundCount
-                     && sdlBackgroundTextures[backgroundIndex] != NULL)
-                        SDL_RenderCopy(sdlRenderer, sdlBackgroundTextures[backgroundIndex], NULL, NULL);
+                    if (backgroundOption < sBorderBackgroundCount
+                     && sdlBackgroundTextures[backgroundOption] != NULL)
+                        SDL_RenderCopy(sdlRenderer, sdlBackgroundTextures[backgroundOption], NULL, NULL);
                     int outputWidth;
                     int outputHeight;
                     SDL_GetRendererOutputSize(sdlRenderer, &outputWidth, &outputHeight);
-                    int gameHeight = outputHeight * 8 / 9;
-                    int gameWidth = gameHeight * 3 / 2;
+                    int gameHeight;
+                    int gameWidth;
+                    if (sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE])
+                    {
+                        int scale = outputWidth / DISPLAY_WIDTH;
+                        if (outputHeight / DISPLAY_HEIGHT < scale)
+                            scale = outputHeight / DISPLAY_HEIGHT;
+                        if (scale < 1)
+                            scale = 1;
+                        gameWidth = DISPLAY_WIDTH * scale;
+                        gameHeight = DISPLAY_HEIGHT * scale;
+                    }
+                    else
+                    {
+                        gameHeight = outputHeight * 8 / 9;
+                        gameWidth = gameHeight * 3 / 2;
+                    }
                     SDL_Rect gameViewport = {(outputWidth - gameWidth) / 2,
                                              (outputHeight - gameHeight) / 2,
                                              gameWidth, gameHeight};
                     SDL_RenderCopy(sdlRenderer, sdlTexture, NULL, &gameViewport);
-                    if (sdlBorderTexture != NULL)
+                    if (sPlatformSettings[PLATFORM_SETTING_BORDER] && sdlBorderTexture != NULL)
                     {
                         SDL_Rect borderSource = {141, 18, 1000, 683};
                         int innerWidth = gameViewport.w - 2;
@@ -400,14 +430,32 @@ static void ReadSaveFile(const char *path)
 static void ReadConfigFile(void)
 {
     FILE *configFile = fopen(sConfigPath, "r");
-    unsigned int selection;
+    char line[64];
+    unsigned int value;
 
     if (configFile == NULL)
         return;
-    if (fscanf(configFile, "borderBackground=%u", &selection) == 1 && selection < 16)
+    while (fgets(line, sizeof(line), configFile) != NULL)
     {
-        sBorderBackground = selection;
-        sHasBorderBackgroundConfig = true;
+        if (sscanf(line, "borderBackground=%u", &value) == 1 && value < 16)
+        {
+            sBorderBackground = value;
+            sHasBorderBackgroundConfig = true;
+        }
+        else if (sscanf(line, "backgroundOrder=%u", &value) == 1)
+            sBackgroundOrderVersion = value;
+        else if (sscanf(line, "fullscreen=%u", &value) == 1)
+            sPlatformSettings[PLATFORM_SETTING_FULLSCREEN] = value != 0;
+        else if (sscanf(line, "windowScale=%u", &value) == 1 && value >= 2 && value <= 5)
+            sPlatformSettings[PLATFORM_SETTING_WINDOW_SCALE] = value;
+        else if (sscanf(line, "integerScale=%u", &value) == 1)
+            sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE] = value != 0;
+        else if (sscanf(line, "vsync=%u", &value) == 1)
+            sPlatformSettings[PLATFORM_SETTING_VSYNC] = value != 0;
+        else if (sscanf(line, "border=%u", &value) == 1)
+            sPlatformSettings[PLATFORM_SETTING_BORDER] = value != 0;
+        else if (sscanf(line, "volume=%u", &value) == 1 && value <= 10)
+            sPlatformSettings[PLATFORM_SETTING_VOLUME] = value;
     }
     fclose(configFile);
 }
@@ -419,7 +467,29 @@ static void StoreConfigFile(void)
     if (configFile == NULL)
         return;
     fprintf(configFile, "borderBackground=%u\n", sBorderBackground);
+    fprintf(configFile, "backgroundOrder=2\n");
+    fprintf(configFile, "fullscreen=%u\n", sPlatformSettings[PLATFORM_SETTING_FULLSCREEN]);
+    fprintf(configFile, "windowScale=%u\n", sPlatformSettings[PLATFORM_SETTING_WINDOW_SCALE]);
+    fprintf(configFile, "integerScale=%u\n", sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE]);
+    fprintf(configFile, "vsync=%u\n", sPlatformSettings[PLATFORM_SETTING_VSYNC]);
+    fprintf(configFile, "border=%u\n", sPlatformSettings[PLATFORM_SETTING_BORDER]);
+    fprintf(configFile, "volume=%u\n", sPlatformSettings[PLATFORM_SETTING_VOLUME]);
     fclose(configFile);
+}
+
+static void ApplyPlatformSettings(void)
+{
+    SDL_RenderSetVSync(sdlRenderer, sPlatformSettings[PLATFORM_SETTING_VSYNC]);
+#if defined(NATIVE_LINUX) || defined(_WIN32)
+    SDL_SetWindowFullscreen(sdlWindow, sPlatformSettings[PLATFORM_SETTING_FULLSCREEN]
+                                      ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+    if (!sPlatformSettings[PLATFORM_SETTING_FULLSCREEN])
+    {
+        int scale = sPlatformSettings[PLATFORM_SETTING_WINDOW_SCALE];
+        SDL_SetWindowSize(sdlWindow, 320 * scale, 180 * scale);
+        SDL_SetWindowPosition(sdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    }
+#endif
 }
 
 static void StoreSaveFile()
@@ -462,7 +532,12 @@ void Platform_QueueAudio(float *audioBuffer, s32 samplesPerFrame)
 {
     if (sdlAudioDevice != 0)
     {
-        if (SDL_QueueAudio(sdlAudioDevice, audioBuffer, samplesPerFrame) < 0)
+        int floatCount = samplesPerFrame / sizeof(float);
+        float adjustedAudio[floatCount];
+        float volume = sPlatformSettings[PLATFORM_SETTING_VOLUME] / 10.0f;
+        for (int i = 0; i < floatCount; i++)
+            adjustedAudio[i] = audioBuffer[i] * volume;
+        if (SDL_QueueAudio(sdlAudioDevice, adjustedAudio, samplesPerFrame) < 0)
             SDL_Log("Failed to queue audio: %s", SDL_GetError());
     }
 }
@@ -477,7 +552,13 @@ u8 Platform_GetBorderBackground(void)
     if (sHasBorderBackgroundConfig)
         return sBorderBackground;
     if (gSaveBlock2Ptr != NULL)
-        return gSaveBlock2Ptr->optionsBorderBackground;
+    {
+        u8 legacySelection = gSaveBlock2Ptr->optionsBorderBackground;
+        if (legacySelection == 1)
+            return sBorderBackgroundCount;
+        if (legacySelection >= 2)
+            return legacySelection - 1;
+    }
     return 0;
 }
 
@@ -488,10 +569,47 @@ void Platform_SetBorderBackground(u8 selection)
     StoreConfigFile();
 }
 
+u8 Platform_GetSetting(enum PlatformSetting setting)
+{
+    return sPlatformSettings[setting];
+}
+
+void Platform_SetSetting(enum PlatformSetting setting, u8 value)
+{
+    sPlatformSettings[setting] = value;
+    if (setting == PLATFORM_SETTING_VSYNC)
+        SDL_RenderSetVSync(sdlRenderer, value);
+#if defined(NATIVE_LINUX) || defined(_WIN32)
+    else if (setting == PLATFORM_SETTING_FULLSCREEN)
+    {
+        SDL_SetWindowFullscreen(sdlWindow, value ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+        if (!value)
+        {
+            int scale = sPlatformSettings[PLATFORM_SETTING_WINDOW_SCALE];
+            SDL_SetWindowSize(sdlWindow, 320 * scale, 180 * scale);
+            SDL_SetWindowPosition(sdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+        }
+    }
+    else if (setting == PLATFORM_SETTING_WINDOW_SCALE && !sPlatformSettings[PLATFORM_SETTING_FULLSCREEN])
+    {
+        SDL_SetWindowSize(sdlWindow, 320 * value, 180 * value);
+        SDL_SetWindowPosition(sdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    }
+#endif
+    StoreConfigFile();
+}
+
 #ifdef __ANDROID__
 JNIEXPORT jint JNICALL Java_com_pokeemerald_experimental_GbaControlsView_getBorderBackground(JNIEnv *env, jclass clazz)
 {
     return Platform_GetBorderBackground();
+}
+
+JNIEXPORT jint JNICALL Java_com_pokeemerald_experimental_GbaControlsView_getPlatformSetting(JNIEnv *env, jclass clazz, jint setting)
+{
+    if (setting < 0 || setting >= PLATFORM_SETTING_COUNT)
+        return 0;
+    return Platform_GetSetting(setting);
 }
 #endif
 

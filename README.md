@@ -25,7 +25,7 @@ The project runs the decompiled game code directly. It is not a bundled GBA emul
 - Added a Wine launcher for the Windows build.
 - Added native 32-bit Linux compilation and SDL2 linkage.
 - Added aspect-ratio-preserving 3:2 rendering with independently scaled background artwork and a transparent frame.
-- Added a persistent `BORDER BG` option with automatic support for additional numbered background images.
+- Added persistent display settings with automatic support for additional numbered background images.
 - Added an experimental Android SDL2/Gradle project and an ARMv7 cross-compilation pipeline.
 - Added Android rendering, frame pacing, audio output, writable save storage, and lifecycle handling.
 - Added an Android-native labeled multitouch overlay and SDL game-controller input.
@@ -75,15 +75,21 @@ Linux objects are kept separately under `build/linux`, so they do not interfere 
 
 The resulting executable is `pokeemerald` in the repository root.
 
+## Display Settings
+
+The in-game Options menu includes a `DISPLAY` page. Settings apply immediately and are written to `pokeemerald.cfg`; Android stores the same config in the app's private storage.
+
+Desktop builds support fullscreen, window size, integer scaling, VSync, border frame visibility, background selection, and volume. Android supports border frame visibility, background selection, and volume.
+
 ## Border Artwork
 
 Windows, Linux, and Android use the same border assets from the repository root:
 
 - `Border.png` is the transparent frame fitted around the centered 3:2 gameplay viewport.
 - `BG.png` is the default background and scales independently to fill the complete output.
-- `BG1.png`, `BG2.png`, and subsequent sequentially numbered files add selectable backgrounds.
+- `BG1.png`, `BG2.png`, and subsequent sequentially numbered files add selectable backgrounds after the default `BG` entry.
 
-The in-game Options menu includes `BORDER BG`. Select `BG` for the default artwork, `OFF` for a plain black background, or `BG 1`, `BG 2`, and so on for detected numbered backgrounds. The choice is written immediately to `pokeemerald.cfg` (Android uses the app's private storage), so it persists without requiring an in-game save. Numbered files must be contiguous; for example, `BG2.png` is only detected when `BG1.png` is also present.
+The background selector order is `BG`, `BG 1`, `BG 2`, and so on, followed by `OFF` for a plain black background. Numbered files must be contiguous; for example, `BG2.png` is only detected when `BG1.png` is also present.
 
 Backgrounds and the frame should use a 1280x720 canvas. Keep the frame opening centered at the same location and dimensions as `Border.png` so it remains aligned at different output aspect ratios.
 
