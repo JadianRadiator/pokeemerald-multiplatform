@@ -15,19 +15,20 @@ jobs:
       GAME_LANGUAGE: ENGLISH
       MODERN: 0
       COMPARE: 1
+
     steps:
       - name: Checkout
-        uses: actions/checkout@master
-
-      - name: Checkout syms
-        if: ${{ github.event_name == 'push' }}
-        uses: actions/checkout@master
+        uses: actions/checkout@v4
         with:
-          path: symbols
-          ref: symbols
+          fetch-depth: 0
+
+      - name: Prepare symbols directory
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          mkdir -p symbols
 
       - name: Checkout agbcc
-        uses: actions/checkout@master
+        uses: actions/checkout@v4
         with:
           path: agbcc
           repository: pret/agbcc
@@ -35,9 +36,6 @@ jobs:
       - name: Install binutils
         run: |
           sudo apt install gcc-arm-none-eabi binutils-arm-none-eabi libpng-dev
-        # build-essential and git are already installed
-        # gcc-arm-none-eabi is only needed for the modern build
-        # as an alternative to dkP
 
       - name: Install agbcc
         run: |
@@ -46,23 +44,23 @@ jobs:
         working-directory: agbcc
 
       - name: Compare
-        run: make -j${nproc} all syms
+        run: make -j$(nproc) all syms
 
       - name: Modern
         env:
           MODERN: 1
           COMPARE: 0
-        run: make -j${nproc} all
+        run: make -j$(nproc) all
 
       - name: Move symfiles
         if: ${{ github.event_name == 'push' }}
         run: |
           cp -v *.sym symbols/
-          echo "SYMBOLS_COMMIT_MSG=$( git log --format=%s ${GITHUB_SHA} )" >> $GITHUB_ENV
+          echo "SYMBOLS_COMMIT_MSG=$(git log --format=%s ${GITHUB_SHA})" >> $GITHUB_ENV
 
       - name: Update symfiles
         if: ${{ github.event_name == 'push' }}
-        uses: EndBug/add-and-commit@v7
+        uses: EndBug/add-and-commit@v9
         with:
           branch: symbols
           cwd: "./symbols"
