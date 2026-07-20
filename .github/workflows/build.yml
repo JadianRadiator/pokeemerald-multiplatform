@@ -32,7 +32,6 @@ jobs:
         with:
           path: agbcc
           repository: pret/agbcc
-          ref: 6a3d5c6
 
       - name: Install binutils
         run: |
